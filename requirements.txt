@@ -1,0 +1,6 @@
+# For macOS/Linux
+touch requirements.txt
+# For Windows
+# type nul > requirements.txt
+
+requests>=2.28.0
