@@ -1,6 +1,3 @@
-
-
-
 #!/usr/bin/env python3
 import os
 import sys
@@ -12,6 +9,7 @@ import requests
 import re
 from pathlib import Path
 import time
+import getpass
 
 # Setup logging
 logging.basicConfig(
@@ -56,30 +54,52 @@ class DevOpsAIAgent:
         config = {}
         
         # Get OpenRouter API Key
+        print("\nYou will now be prompted to enter your OpenRouter API key.")
         while True:
-            api_key = input("\nEnter your OpenRouter API key: ").strip()
-            if self.validate_openrouter_api_key(api_key):
-                config['api_key'] = api_key
-                break
-            else:
-                print("Invalid API key. Please try again.")
+            try:
+                # Using sys.stdin.readline() for more reliable input handling
+                print("\nEnter your OpenRouter API key: ", end='', flush=True)
+                api_key = sys.stdin.readline().strip()
+                print(f"Validating API key...")
+                if self.validate_openrouter_api_key(api_key):
+                    config['api_key'] = api_key
+                    print("API key validation successful!")
+                    break
+                else:
+                    print("Invalid API key. Please try again.")
+            except Exception as e:
+                logger.error(f"Exception during API key input: {e}")
+                print("Error during API key input. Please try again.")
         
         # Get Model choice
-        print("\nAvailable Models:")
+        print("\nFetching available models...")
         models = self.get_available_models(config['api_key'])
+        
+        print("\nAvailable Models:")
         for i, model in enumerate(models, 1):
             print(f"{i}. {model}")
         
         while True:
             try:
-                choice = int(input("\nSelect a model (number): "))
-                if 1 <= choice <= len(models):
-                    config['model'] = models[choice-1]
-                    break
+                print("\nSelect a model (number) or enter a custom model ID: ", end='', flush=True)
+                choice_input = sys.stdin.readline().strip()
+                
+                # Check if input is a number (model selection from list)
+                if choice_input.isdigit():
+                    choice = int(choice_input)
+                    if 1 <= choice <= len(models):
+                        config['model'] = models[choice-1]
+                        print(f"Selected model: {config['model']}")
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(models)}.")
+                # If not a number, treat as custom model ID
                 else:
-                    print(f"Please enter a number between 1 and {len(models)}.")
+                    config['model'] = choice_input
+                    print(f"Using custom model: {config['model']}")
+                    break
             except ValueError:
-                print("Please enter a valid number.")
+                print("Please enter a valid number or model ID.")
         
         # Configure error monitoring settings
         config['error_monitoring'] = {
@@ -95,6 +115,7 @@ class DevOpsAIAgent:
         }
         
         # Save config
+        print("\nSaving configuration...")
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=2)
         
@@ -123,7 +144,7 @@ class DevOpsAIAgent:
             return False
     
     def get_available_models(self, api_key):
-        """Get available models from OpenRouter"""
+        """Get all available models from OpenRouter"""
         try:
             headers = {
                 'Authorization': f'Bearer {api_key}',
@@ -138,33 +159,64 @@ class DevOpsAIAgent:
             
             if response.status_code == 200:
                 models_data = response.json()
-                # Filter for models that are good at coding and technical tasks
-                recommended_models = [
-                    "anthropic/claude-3-opus",
-                    "anthropic/claude-3-sonnet",
-                    "google/gemini-pro",
-                    "openai/gpt-4-turbo",
-                    "openai/gpt-4o",
-                    "mistralai/mixtral-8x7b"
-                ]
                 
+                # Get all available models instead of filtering
                 available_models = []
                 for model in models_data.get('data', []):
                     model_id = model.get('id')
-                    if model_id in recommended_models:
+                    if model_id:
                         available_models.append(model_id)
                 
+                # If no models were found, provide default fallback models
                 if not available_models:
-                    # Fallback to some default models if API doesn't return expected format
-                    return recommended_models
+                    logger.warning("No models returned from API, using fallback list")
+                    return [
+                        "anthropic/claude-3-opus",
+                        "anthropic/claude-3-sonnet",
+                        "anthropic/claude-3-haiku",
+                        "google/gemini-pro",
+                        "google/gemini-1.5-pro",
+                        "openai/gpt-4o",
+                        "openai/gpt-4-turbo",
+                        "openai/gpt-3.5-turbo",
+                        "meta/llama-3-70b-instruct",
+                        "mistralai/mixtral-8x7b",
+                        "mistralai/mistral-7b-instruct"
+                    ]
                 
                 return available_models
             else:
                 logger.warning(f"Could not fetch models: {response.status_code}")
-                return ["anthropic/claude-3-sonnet", "openai/gpt-4o"]
+                # Return a wide variety of models as fallback
+                return [
+                    "anthropic/claude-3-opus",
+                    "anthropic/claude-3-sonnet",
+                    "anthropic/claude-3-haiku",
+                    "google/gemini-pro",
+                    "google/gemini-1.5-pro", 
+                    "openai/gpt-4o",
+                    "openai/gpt-4-turbo",
+                    "openai/gpt-3.5-turbo",
+                    "meta/llama-3-70b-instruct",
+                    "mistralai/mixtral-8x7b",
+                    "mistralai/mistral-7b-instruct"
+                ]
         except Exception as e:
             logger.error(f"Error fetching models: {e}")
-            return ["anthropic/claude-3-sonnet", "openai/gpt-4o"]
+            # Return a wide variety of models as fallback
+            return [
+                "anthropic/claude-3-opus",
+                "anthropic/claude-3-sonnet",
+                "anthropic/claude-3-haiku",
+                "google/gemini-pro",
+                "google/gemini-1.5-pro",
+                "openai/gpt-4o",
+                "openai/gpt-4-turbo",
+                "openai/gpt-3.5-turbo",
+                "meta/llama-3-70b-instruct",
+                "mistralai/mixtral-8x7b",
+                "mistralai/mistral-7b-instruct"
+            ]
     
     def analyze_error(self, error_text):
         """Analyze an error using the AI model"""
@@ -288,7 +340,14 @@ Format your response in markdown with clear steps that can be executed in a term
             elif args.text:
                 error_text = args.text
             else:
-                error_text = input("Enter the error text to analyze:\n")
+                print("Enter the error text to analyze (type 'DONE' on a new line when finished):")
+                lines = []
+                while True:
+                    line = sys.stdin.readline().strip()
+                    if line == 'DONE':
+                        break
+                    lines.append(line)
+                error_text = '\n'.join(lines)
                 
             print("\nAnalyzing error...\n")
             analysis = self.analyze_error(error_text)
@@ -298,7 +357,8 @@ Format your response in markdown with clear steps that can be executed in a term
             if args.tool:
                 tool_name = args.tool
             else:
-                tool_name = input("Enter the name of the tool to install: ")
+                print("Enter the name of the tool to install: ", end='', flush=True)
+                tool_name = sys.stdin.readline().strip()
                 
             print(f"\nGetting installation instructions for {tool_name}...\n")
             instructions = self.install_tool(tool_name)
@@ -308,8 +368,65 @@ Format your response in markdown with clear steps that can be executed in a term
             self.start_monitoring()
             
         elif args.command == 'setup':
-            self.first_time_setup()
-            print("Setup completed. Restart the agent to apply changes.")
+            if args.api_key:
+                print(f"Using provided API key from command line")
+                config = {}
+                config['api_key'] = args.api_key
+                
+                if args.model:
+                    config['model'] = args.model
+                    print(f"Using provided model: {config['model']}")
+                else:
+                    # Get Model choice
+                    print("\nFetching available models...")
+                    models = self.get_available_models(config['api_key'])
+                    
+                    print("\nAvailable Models:")
+                    for i, model in enumerate(models, 1):
+                        print(f"{i}. {model}")
+                    
+                    while True:
+                        try:
+                            print("\nSelect a model (number) or enter a custom model ID: ", end='', flush=True)
+                            choice_input = sys.stdin.readline().strip()
+                            
+                            if choice_input.isdigit():
+                                choice = int(choice_input)
+                                if 1 <= choice <= len(models):
+                                    config['model'] = models[choice-1]
+                                    print(f"Selected model: {config['model']}")
+                                    break
+                                else:
+                                    print(f"Please enter a number between 1 and {len(models)}.")
+                            else:
+                                config['model'] = choice_input
+                                print(f"Using custom model: {config['model']}")
+                                break
+                        except ValueError:
+                            print("Please enter a valid number or model ID.")
+                
+                # Configure error monitoring settings
+                config['error_monitoring'] = {
+                    'enabled': True,
+                    'scan_interval': 300,  # 5 minutes
+                    'log_patterns': [
+                        r'error:',
+                        r'exception',
+                        r'failure',
+                        r'fatal',
+                        r'critical'
+                    ]
+                }
+                
+                # Save config
+                print("\nSaving configuration...")
+                with open(CONFIG_FILE, 'w') as f:
+                    json.dump(config, f, indent=2)
+                
+                print("\nSetup completed successfully!")
+                self.config = config
+            else:
+                self.config = self.first_time_setup()
             
         else:
             print("Unknown command. Use --help for available commands.")
@@ -332,7 +449,9 @@ def main():
     subparsers.add_parser('monitor', help='Start error monitoring')
     
     # Setup command
-    subparsers.add_parser('setup', help='Run first-time setup or reconfigure')
+    setup_parser = subparsers.add_parser('setup', help='Run first-time setup or reconfigure')
+    setup_parser.add_argument('--api-key', help='OpenRouter API key')
+    setup_parser.add_argument('--model', help='Model ID to use')
     
     args = parser.parse_args()
     
