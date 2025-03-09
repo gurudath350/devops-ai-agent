@@ -346,7 +346,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-# For macOS/Linux
-touch devops_agent.py
-# For Windows
-# type nul > devops_agent.py
+
