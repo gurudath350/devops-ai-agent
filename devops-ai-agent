@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+import os
+import sys
+import json
+import argparse
+import logging
+import subprocess
+import requests
+import re
+from pathlib import Path
+import time
+import getpass
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger('devops-ai-agent')
+
+CONFIG_DIR = Path.home() / '.devops-ai-agent'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+
+class DevOpsAIAgent:
+    def __init__(self):
+        self.config = self.load_config()
+        
+    def load_config(self):
+        """Load configuration from config file or create if not exists"""
+        if not CONFIG_DIR.exists():
+            CONFIG_DIR.mkdir(parents=True)
+            
+        if not CONFIG_FILE.exists():
+            logger.info("No configuration found. Running first-time setup...")
+            return self.first_time_setup()
+        
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                logger.info("Configuration loaded successfully.")
+                return config
+        except Exception as e:
+            logger.error(f"Error loading configuration: {e}")
+            logger.info("Running setup again to fix configuration...")
+            return self.first_time_setup()
+    
+    def first_time_setup(self):
+        """First time setup to configure the AI agent"""
+        print("\n" + "="*50)
+        print("Welcome to DevOps AI Agent Setup!")
+        print("="*50)
+        
+        config = {}
+        
+        # Get OpenRouter API Key
+        print("\nYou will now be prompted to enter your OpenRouter API key.")
+        while True:
+            try:
+                # Using sys.stdin.readline() for more reliable input handling
+                print("\nEnter your OpenRouter API key: ", end='', flush=True)
+                api_key = sys.stdin.readline().strip()
+                print(f"Validating API key...")
+                if self.validate_openrouter_api_key(api_key):
+                    config['api_key'] = api_key
+                    print("API key validation successful!")
+                    break
+                else:
+                    print("Invalid API key. Please try again.")
+            except Exception as e:
+                logger.error(f"Exception during API key input: {e}")
+                print("Error during API key input. Please try again.")
+        
+        # Get Model choice
+        print("\nFetching available models...")
+        models = self.get_available_models(config['api_key'])
+        
+        print("\nAvailable Models:")
+        for i, model in enumerate(models, 1):
+            print(f"{i}. {model}")
+        
+        while True:
+            try:
+                print("\nSelect a model (number) or enter a custom model ID: ", end='', flush=True)
+                choice_input = sys.stdin.readline().strip()
+                
+                # Check if input is a number (model selection from list)
+                if choice_input.isdigit():
+                    choice = int(choice_input)
+                    if 1 <= choice <= len(models):
+                        config['model'] = models[choice-1]
+                        print(f"Selected model: {config['model']}")
+                        break
+                    else:
+                        print(f"Please enter a number between 1 and {len(models)}.")
+                # If not a number, treat as custom model ID
+                else:
+                    config['model'] = choice_input
+                    print(f"Using custom model: {config['model']}")
+                    break
+            except ValueError:
+                print("Please enter a valid number or model ID.")
+        
+        # Configure error monitoring settings
+        config['error_monitoring'] = {
+            'enabled': True,
+            'scan_interval': 300,  # 5 minutes
+            'log_patterns': [
+                r'error:',
+                r'exception',
+                r'failure',
+                r'fatal',
+                r'critical'
+            ]
+        }
+        
+        # Save config
+        print("\nSaving configuration...")
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        print("\nSetup completed successfully!")
+        return config
+    
+    def validate_openrouter_api_key(self, api_key):
+        """Validate OpenRouter API key by making a test request"""
+        if not api_key:
+            return False
+            
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            response = requests.get(
+                'https://openrouter.ai/api/v1/auth/key',
+                headers=headers,
+                timeout=10
+            )
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"API key validation error: {e}")
+            return False
+    
+    def get_available_models(self, api_key):
+        """Get all available models from OpenRouter"""
+        try:
+            headers = {
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            response = requests.get(
+                'https://openrouter.ai/api/v1/models',
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                models_data = response.json()
+                
+                # Get all available models instead of filtering
+                available_models = []
+                for model in models_data.get('data', []):
+                    model_id = model.get('id')
+                    if model_id:
+                        available_models.append(model_id)
+                
+                # If no models were found, provide default fallback models
+                if not available_models:
+                    logger.warning("No models returned from API, using fallback list")
+                    return [
+                        "anthropic/claude-3-opus",
+                        "anthropic/claude-3-sonnet",
+                        "anthropic/claude-3-haiku",
+                        "google/gemini-pro",
+                        "google/gemini-1.5-pro",
+                        "openai/gpt-4o",
+                        "openai/gpt-4-turbo",
+                        "openai/gpt-3.5-turbo",
+                        "meta/llama-3-70b-instruct",
+                        "mistralai/mixtral-8x7b",
+                        "mistralai/mistral-7b-instruct"
+                    ]
+                
+                return available_models
+            else:
+                logger.warning(f"Could not fetch models: {response.status_code}")
+                # Return a wide variety of models as fallback
+                return [
+                    "anthropic/claude-3-opus",
+                    "anthropic/claude-3-sonnet",
+                    "anthropic/claude-3-haiku",
+                    "google/gemini-pro",
+                    "google/gemini-1.5-pro", 
+                    "openai/gpt-4o",
+                    "openai/gpt-4-turbo",
+                    "openai/gpt-3.5-turbo",
+                    "meta/llama-3-70b-instruct",
+                    "mistralai/mixtral-8x7b",
+                    "mistralai/mistral-7b-instruct"
+                ]
+        except Exception as e:
+            logger.error(f"Error fetching models: {e}")
+            # Return a wide variety of models as fallback
+            return [
+                "anthropic/claude-3-opus",
+                "anthropic/claude-3-sonnet",
+                "anthropic/claude-3-haiku",
+                "google/gemini-pro",
+                "google/gemini-1.5-pro",
+                "openai/gpt-4o",
+                "openai/gpt-4-turbo",
+                "openai/gpt-3.5-turbo",
+                "meta/llama-3-70b-instruct",
+                "mistralai/mixtral-8x7b",
+                "mistralai/mistral-7b-instruct"
+            ]
+    
+    def analyze_error(self, error_text):
+        """Analyze an error using the AI model"""
+        prompt = f"""You are a DevOps AI assistant. Analyze this error and provide a solution:
